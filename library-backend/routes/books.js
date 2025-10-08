@@ -21,7 +21,8 @@ function handleBooks(req, res, path) {
     req.on("data", (chunk) => (body += chunk.toString()));
     req.on("end", () => {
       try {
-        const { title, author, isbn, total_copies } = JSON.parse(body);
+        // CHANGED: Deconstruct category_id from the request body
+        const { title, author, isbn, total_copies, category_id } = JSON.parse(body);
 
         // Validation
         if (!title || !total_copies) {
@@ -39,16 +40,25 @@ function handleBooks(req, res, path) {
           );
         }
 
-        // Default empty values if not provided
+        // CHANGED: Safely handle category_id (it can be null)
+        const safeCategoryId = category_id ? parseInt(category_id, 10) : null;
+        if (category_id && isNaN(safeCategoryId)) {
+             res.writeHead(400, { "Content-Type": "application/json" });
+             return res.end(JSON.stringify({ error: "category_id must be a number" }));
+        }
+
         const safeAuthor = author || "";
         const safeIsbn = isbn || null;
 
-        pool.query(
-          "INSERT INTO books (title, author, isbn, total_copies, available_copies) VALUES (?, ?, ?, ?, ?)",
-          [title, safeAuthor, safeIsbn, totalCopiesInt, totalCopiesInt],
-          (err, results) => {
+        // CHANGED: Update SQL query to include category_id
+        const sql = "INSERT INTO books (title, author, isbn, total_copies, available_copies, category_id) VALUES (?, ?, ?, ?, ?, ?)";
+        
+        // CHANGED: Add safeCategoryId to the parameters array
+        const params = [title, safeAuthor, safeIsbn, totalCopiesInt, totalCopiesInt, safeCategoryId];
+
+        pool.query(sql, params, (err, results) => {
             if (err) {
-              console.error("MySQL INSERT error:", err); // 🔴 See exact issue here
+              console.error("MySQL INSERT error:", err);
               if (err.code === "ER_DUP_ENTRY") {
                 res.writeHead(400, { "Content-Type": "application/json" });
                 res.end(JSON.stringify({ error: "ISBN already exists" }));
@@ -66,6 +76,7 @@ function handleBooks(req, res, path) {
                   isbn: safeIsbn,
                   total_copies: totalCopiesInt,
                   available_copies: totalCopiesInt,
+                  category_id: safeCategoryId, // CHANGED: Include category_id in the response
                 })
               );
             }
@@ -81,17 +92,16 @@ function handleBooks(req, res, path) {
 
   // PUT /books/:id → update book
   else if (req.method === "PUT") {
+    // NOTE: You may want to update this PUT handler to also handle category_id in the future.
+    // This example only modifies the POST handler as requested.
     const id = path.split("/")[2];
     let body = "";
     req.on("data", (chunk) => (body += chunk.toString()));
     req.on("end", () => {
       try {
-        const { title, author, isbn, total_copies, available_copies } =
-          JSON.parse(body);
-
+        const { title, author, isbn, total_copies, available_copies } = JSON.parse(body);
         const totalCopiesInt = parseInt(total_copies);
         const availableCopiesInt = parseInt(available_copies);
-
         pool.query(
           "UPDATE books SET title=?, author=?, isbn=?, total_copies=?, available_copies=? WHERE id=?",
           [title, author || "", isbn || null, totalCopiesInt, availableCopiesInt, id],
